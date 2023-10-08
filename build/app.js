@@ -13,7 +13,7 @@ class PublishSubscribeService {
         this.types = {};
     }
     subscribe(type, handler) {
-        if (type in this.types == false) {
+        if (type in this.types === false) {
             this.types[type] = handler;
         }
     }
@@ -58,13 +58,43 @@ class MachineRefillEvent {
         return 'refill';
     }
 }
+class LowStockEvent {
+    constructor(_machineId) {
+        this._machineId = _machineId;
+    }
+    machineId() {
+        return this._machineId;
+    }
+    type() {
+        return 'low';
+    }
+}
+class StockOkEvent {
+    constructor(_machineId) {
+        this._machineId = _machineId;
+    }
+    machineId() {
+        return this._machineId;
+    }
+    type() {
+        return 'ok';
+    }
+}
+class StockWarningSubscriber {
+    constructor(machines) {
+        this.machines = machines;
+    }
+    handle(event) {
+        console.log(`${event.machineId()} : ${(event.type() === 'ok' ? "Stock is Ok" : "Low Stock")}`);
+    }
+}
 class MachineSaleSubscriber {
     constructor(machines) {
         this.machines = machines;
     }
     handle(event) {
-        let machine = this.machines.find(m => m.id == event.machineId());
-        if (machine == undefined) {
+        let machine = this.machines.find(m => m.id === event.machineId());
+        if (machine === undefined) {
             throw new Error("Machine not found.");
         }
         machine.stockLevel -= event.getSoldQuantity();
@@ -75,8 +105,8 @@ class MachineRefillSubscriber {
         this.machines = machines;
     }
     handle(event) {
-        let machine = this.machines.find(m => m.id == event.machineId());
-        if (machine == undefined) {
+        let machine = this.machines.find(m => m.id === event.machineId());
+        if (machine === undefined) {
             throw new Error("Machine not found.");
         }
         machine.stockLevel += event.getRefillQuantity();
@@ -86,6 +116,7 @@ class MachineRefillSubscriber {
 class Machine {
     constructor(id) {
         this.stockLevel = 10;
+        this.warningFired = false;
         this.id = id;
     }
 }
@@ -113,26 +144,57 @@ const eventGenerator = () => {
 (() => __awaiter(void 0, void 0, void 0, function* () {
     // create 3 machines with a quantity of 10 stock
     const machines = [new Machine('001'), new Machine('002'), new Machine('003')];
+    const testLowStockMachine = [new Machine('004'), new Machine('005')];
     // create a machine sale event subscriber. inject the machines (all subscribers should do this)
-    const saleSubscriber = new MachineSaleSubscriber(machines);
-    const refillSubscriber = new MachineRefillSubscriber(machines);
-    console.log(saleSubscriber);
-    console.log(refillSubscriber);
+    const saleSubscriber = new MachineSaleSubscriber(machines.concat(testLowStockMachine));
+    const refillSubscriber = new MachineRefillSubscriber(machines.concat(testLowStockMachine));
+    const stockWarningSubscriber = new StockWarningSubscriber(testLowStockMachine);
+    const stockThreshold = 3;
     // create the PubSub service
     const pubSubService = new PublishSubscribeService;
     pubSubService.subscribe("sale", saleSubscriber);
     pubSubService.subscribe("refill", refillSubscriber);
-    console.log(pubSubService.types);
+    // unsubscribe refill event
     pubSubService.unsubscribe("refill");
-    console.log(pubSubService.types);
     // create 5 random events
     const events = [1, 2, 3, 4, 5].map(i => eventGenerator());
     console.log(events);
     // publish the events
     events.forEach(e => pubSubService.publish(e));
-    console.log(saleSubscriber.machines);
-    console.log(refillSubscriber.machines);
+    // resubscribe refill event
     pubSubService.subscribe("refill", refillSubscriber);
-    console.log(saleSubscriber.machines);
-    console.log(refillSubscriber.machines);
+    console.log(machines);
+    // test low stock event
+    pubSubService.subscribe("low", stockWarningSubscriber);
+    pubSubService.subscribe("ok", stockWarningSubscriber);
+    const forceLowStock = new MachineSaleEvent(9, '004');
+    pubSubService.publish(forceLowStock);
+    console.log(testLowStockMachine);
+    testLowStockMachine.forEach(machine => {
+        if (machine.stockLevel < stockThreshold) {
+            const lowStockEvent = new LowStockEvent(machine.id);
+            pubSubService.publish(lowStockEvent);
+            machine.warningFired = true;
+        }
+        else if (machine.stockLevel > stockThreshold && machine.warningFired === true) {
+            const stockOkEvent = new StockOkEvent(machine.id);
+            pubSubService.publish(stockOkEvent);
+            machine.warningFired = false;
+        }
+    });
+    const forceReStock = new MachineRefillEvent(9, '004');
+    pubSubService.publish(forceReStock);
+    console.log(testLowStockMachine);
+    testLowStockMachine.forEach(machine => {
+        if (machine.stockLevel < stockThreshold) {
+            const lowStockEvent = new LowStockEvent(machine.id);
+            pubSubService.publish(lowStockEvent);
+            machine.warningFired = true;
+        }
+        else if (machine.stockLevel > stockThreshold && machine.warningFired === true) {
+            const stockOkEvent = new StockOkEvent(machine.id);
+            pubSubService.publish(stockOkEvent);
+            machine.warningFired = false;
+        }
+    });
 }))();
